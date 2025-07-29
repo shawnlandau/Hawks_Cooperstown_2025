@@ -1,0 +1,26 @@
+# Firebase Configuration for hawks2025dev Project
+# Replace the placeholder values with your actual Firebase project configuration
+
+# Option 1: Environment Variable (Recommended)
+# Add this to your .env file:
+REACT_APP_FIREBASE_CONFIG={"apiKey":"YOUR_API_KEY","authDomain":"hawks2025dev.firebaseapp.com","projectId":"hawks2025dev","storageBucket":"hawks2025dev.appspot.com","messagingSenderId":"YOUR_SENDER_ID","appId":"YOUR_APP_ID"}
+
+# Option 2: Global Variable
+# Add this to your public/index.html in a <script> tag:
+# <script>
+# window.__firebase_config = '{"apiKey":"YOUR_API_KEY","authDomain":"hawks2025dev.firebaseapp.com","projectId":"hawks2025dev","storageBucket":"hawks2025dev.appspot.com","messagingSenderId":"YOUR_SENDER_ID","appId":"YOUR_APP_ID"}';
+# </script>
+
+# To get your Firebase configuration:
+# 1. Go to https://console.firebase.google.com/
+# 2. Select your hawks2025dev project
+# 3. Click on the gear icon (Project Settings)
+# 4. Scroll down to "Your apps" section
+# 5. Click "Add app" if you haven't already
+# 6. Choose "Web" and register your app
+# 7. Copy the config object and replace the values above
+
+# Security Rules Summary:
+# - Firestore: Users can read all photos, create photos when authenticated, update/delete only their own photos
+# - Storage: Users can read all photos, upload images up to 10MB, delete only when authenticated
+# - Authentication: Email/password and Google sign-in enabled
