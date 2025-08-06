@@ -5,11 +5,17 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [forgotPasswordError, setForgotPasswordError] = useState('');
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+  const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: ''
   });
+  const [rememberMe, setRememberMe] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
   const handleInputChange = (e) => {
@@ -70,8 +76,50 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
   };
 
   const handleForgotPassword = () => {
-    // TODO: Implement forgot password functionality
-    alert('Forgot password functionality will be implemented soon.');
+    setShowForgotPassword(true);
+    setForgotPasswordEmail(formData.email);
+    setForgotPasswordError('');
+    setForgotPasswordSuccess(false);
+  };
+
+  const handleForgotPasswordSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!forgotPasswordEmail || !/\S+@\S+\.\S+/.test(forgotPasswordEmail)) {
+      setForgotPasswordError('Please enter a valid email address');
+      return;
+    }
+
+    setIsForgotPasswordLoading(true);
+    setForgotPasswordError('');
+
+    try {
+      // Call the forgot password function from the parent component
+      await onAuth(forgotPasswordEmail, null, false, 'forgot-password');
+      setForgotPasswordSuccess(true);
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      let errorMessage = 'Failed to send password reset email. Please try again.';
+      
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email address.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many attempts. Please try again later.';
+      }
+      
+      setForgotPasswordError(errorMessage);
+    } finally {
+      setIsForgotPasswordLoading(false);
+    }
+  };
+
+  const handleBackToSignIn = () => {
+    setShowForgotPassword(false);
+    setForgotPasswordEmail('');
+    setForgotPasswordError('');
+    setForgotPasswordSuccess(false);
   };
 
   const getPasswordStrength = (password) => {
@@ -101,20 +149,19 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
   const passwordStrength = getPasswordStrength(formData.password);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-hawks-navy via-hawks-navy-dark to-hawks-red flex items-center justify-center p-4 sm:p-6">
-      {/* Background pattern - hidden on small screens */}
-      <div className="absolute inset-0 opacity-5 hidden sm:block">
-        <div className="absolute inset-0" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.1\'%3E%3Cpath d=\'M30 0L60 30L30 60L0 30Z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }}></div>
-      </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6">
+      {/* Subtle gradient background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-blue-50 opacity-30"></div>
 
       <div className="w-full max-w-md relative z-10">
         {/* Logo and Header */}
-        <div className="text-center mb-6 sm:mb-8">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-full flex items-center justify-center shadow-2xl border-4 border-hawks-red mx-auto mb-4 sm:mb-6 overflow-hidden">
+        <div className="text-center mb-8">
+          <div className="w-32 h-32 sm:w-36 sm:h-36 bg-white rounded-full flex items-center justify-center shadow-xl mx-auto mb-6 overflow-hidden border-4 border-hawks-red/20">
             <img 
               src="/hawks-logo.jpg" 
-              alt="Hawks Baseball Team Logo" 
-              className="w-full h-full object-contain p-2"
+              alt="Hawks Baseball Team Logo - Cooperstown Dreams Park 2025" 
+              className="w-full h-full object-contain p-3"
+              loading="lazy"
               onError={(e) => {
                 console.log('Hawks logo failed to load, using fallback');
                 e.target.style.display = 'none';
@@ -126,27 +173,24 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
               <div className="text-hawks-red font-bold leading-tight mb-1">BASEBALL</div>
             </div>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
             Hawks Baseball
           </h1>
-          <p className="text-hawks-gold font-medium text-sm sm:text-base">
+          <p className="text-gray-600 font-medium text-base sm:text-lg">
             Cooperstown Dreams Park 2025
-          </p>
-          <p className="text-white/80 text-xs sm:text-sm mt-2 px-4">
-            {isSignUp ? 'Create your account to share memories' : 'Sign in to view and share photos'}
           </p>
         </div>
 
         {/* Auth Form */}
-        <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 border-2 border-hawks-red">
-          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 sm:p-10 border border-gray-100">
+          <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-8">
             {/* Email Field */}
             <div>
-              <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-3">
                 Email Address
               </label>
               <div className="relative">
-                <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
+                <FaEnvelope className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
                 <input
                   type="email"
                   id="email"
@@ -155,8 +199,9 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                   onChange={handleInputChange}
                   autoComplete={isSignUp ? "email" : "email"}
                   aria-describedby={validationErrors.email ? "email-error" : undefined}
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-hawks-red focus:border-transparent transition-colors text-base ${
-                    validationErrors.email ? 'border-red-500' : 'border-gray-300'
+                  aria-invalid={validationErrors.email ? "true" : "false"}
+                  className={`w-full pl-12 pr-4 h-14 border-2 rounded-xl focus:ring-4 focus:ring-offset-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200 text-base ${
+                    validationErrors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
                   }`}
                   placeholder="Enter your email address"
                   disabled={isLoading}
@@ -164,7 +209,7 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                 />
               </div>
               {validationErrors.email && (
-                <p id="email-error" className="text-red-500 text-sm mt-1" role="alert">
+                <p id="email-error" className="text-red-500 text-sm mt-2 font-medium" role="alert">
                   {validationErrors.email}
                 </p>
               )}
@@ -172,11 +217,11 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
 
             {/* Password Field */}
             <div>
-              <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-3">
                 Password
               </label>
               <div className="relative">
-                <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
+                <FaLock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   id="password"
@@ -185,8 +230,9 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                   onChange={handleInputChange}
                   autoComplete={isSignUp ? "new-password" : "current-password"}
                   aria-describedby={validationErrors.password ? "password-error" : undefined}
-                  className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-hawks-red focus:border-transparent transition-colors text-base ${
-                    validationErrors.password ? 'border-red-500' : 'border-gray-300'
+                  aria-invalid={validationErrors.password ? "true" : "false"}
+                  className={`w-full pl-12 pr-14 h-14 border-2 rounded-xl focus:ring-4 focus:ring-offset-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200 text-base ${
+                    validationErrors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
                   }`}
                   placeholder="Enter your password"
                   disabled={isLoading}
@@ -195,26 +241,26 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100 transition-colors"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <FaEyeSlash aria-hidden="true" /> : <FaEye aria-hidden="true" />}
                 </button>
               </div>
               {validationErrors.password && (
-                <p id="password-error" className="text-red-500 text-sm mt-1" role="alert">
+                <p id="password-error" className="text-red-500 text-sm mt-2 font-medium" role="alert">
                   {validationErrors.password}
                 </p>
               )}
               
               {/* Password Strength Indicator */}
               {formData.password && (
-                <div className="mt-2">
+                <div className="mt-3">
                   <div className="flex space-x-1">
                     {[1, 2, 3, 4, 5].map((level) => (
                       <div
                         key={level}
-                        className={`h-2 flex-1 rounded transition-colors ${
+                        className={`h-2 flex-1 rounded-full transition-all duration-300 ${
                           passwordStrength && passwordStrength.bgColor && level <= passwordStrength.strength
                             ? passwordStrength.bgColor
                             : 'bg-gray-200'
@@ -223,7 +269,7 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                       />
                     ))}
                   </div>
-                  <p className={`text-xs mt-1 ${passwordStrength && passwordStrength.color ? passwordStrength.color : 'text-gray-500'}`}>
+                  <p className={`text-xs mt-2 font-medium ${passwordStrength && passwordStrength.color ? passwordStrength.color : 'text-gray-500'}`}>
                     {passwordStrength && passwordStrength.label ? `Password strength: ${passwordStrength.label}` : ''}
                   </p>
                 </div>
@@ -233,11 +279,11 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
             {/* Confirm Password Field (Sign Up Only) */}
             {isSignUp && (
               <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-semibold text-gray-700 mb-2">
+                <label htmlFor="confirmPassword" className="block text-sm font-semibold text-gray-700 mb-3">
                   Confirm Password
                 </label>
                 <div className="relative">
-                  <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
+                  <FaLock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
                     id="confirmPassword"
@@ -246,8 +292,9 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                     onChange={handleInputChange}
                     autoComplete="new-password"
                     aria-describedby={validationErrors.confirmPassword ? "confirm-password-error" : undefined}
-                    className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-hawks-red focus:border-transparent transition-colors text-base ${
-                      validationErrors.confirmPassword ? 'border-red-500' : 'border-gray-300'
+                    aria-invalid={validationErrors.confirmPassword ? "true" : "false"}
+                    className={`w-full pl-12 pr-14 h-14 border-2 rounded-xl focus:ring-4 focus:ring-offset-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200 text-base ${
+                      validationErrors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-gray-300 hover:border-gray-400'
                     }`}
                     placeholder="Confirm your password"
                     disabled={isLoading}
@@ -256,27 +303,36 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100 transition-colors"
                     aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
                     {showConfirmPassword ? <FaEyeSlash aria-hidden="true" /> : <FaEye aria-hidden="true" />}
                   </button>
                 </div>
                 {validationErrors.confirmPassword && (
-                  <p id="confirm-password-error" className="text-red-500 text-sm mt-1" role="alert">
+                  <p id="confirm-password-error" className="text-red-500 text-sm mt-2 font-medium" role="alert">
                     {validationErrors.confirmPassword}
                   </p>
                 )}
               </div>
             )}
 
-            {/* Forgot Password Link (Sign In Only) */}
+            {/* Remember Me Checkbox (Sign In Only) */}
             {!isSignUp && (
-              <div className="text-right">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="rounded border-gray-300 text-red-600 focus:ring-red-500 h-5 w-5"
+                  />
+                  <span className="ml-3 text-sm text-gray-700">Remember me</span>
+                </label>
                 <button
                   type="button"
                   onClick={handleForgotPassword}
-                  className="text-sm text-hawks-red hover:text-hawks-red-dark font-medium transition-colors"
+                  className="text-sm text-red-600 hover:text-red-700 font-medium transition-colors hover:underline"
                 >
                   Forgot password?
                 </button>
@@ -285,8 +341,8 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3" role="alert">
-                <p className="text-red-600 text-sm">{error}</p>
+              <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4" role="alert">
+                <p className="text-red-600 text-sm font-medium">{error}</p>
               </div>
             )}
 
@@ -294,16 +350,16 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-hawks-red text-white py-3 px-4 rounded-lg font-semibold hover:bg-hawks-red-dark transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 text-base"
+              className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-4 px-6 rounded-xl font-semibold hover:from-red-700 hover:to-red-800 focus:ring-4 focus:ring-offset-2 focus:ring-red-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-3 text-base h-14 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               {isLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" aria-hidden="true"></div>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" aria-hidden="true"></div>
                   <span>Loading...</span>
                 </>
               ) : (
                 <>
-                  <FaUser className="w-4 h-4" aria-hidden="true" />
+                  <FaUser className="w-5 h-5" aria-hidden="true" />
                   <span>{isSignUp ? 'Create Account' : 'Sign In'}</span>
                 </>
               )}
@@ -314,16 +370,17 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
               type="button"
               onClick={handleGoogleAuth}
               disabled={isLoading}
-              className="w-full bg-white border-2 border-gray-300 text-gray-700 py-3 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 text-base"
+              className="w-full bg-white border-2 border-gray-300 text-gray-700 py-4 px-6 rounded-xl font-semibold hover:bg-gray-50 hover:border-gray-400 focus:ring-4 focus:ring-offset-2 focus:ring-gray-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-3 text-base h-14 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              aria-label="Sign in with Google"
             >
-              <FaGoogle className="w-4 h-4 text-red-500" aria-hidden="true" />
+              <FaGoogle className="w-5 h-5 text-red-500" aria-hidden="true" />
               <span>Continue with Google</span>
             </button>
           </form>
 
           {/* Toggle Sign Up/Sign In */}
-          <div className="mt-6 text-center">
-            <p className="text-gray-600 text-sm">
+          <div className="mt-8 text-center">
+            <p className="text-gray-600 text-base">
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}
               <button
                 type="button"
@@ -334,7 +391,7 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
                   setShowPassword(false);
                   setShowConfirmPassword(false);
                 }}
-                className="ml-1 text-hawks-red font-semibold hover:underline transition-colors"
+                className="ml-2 text-red-600 font-semibold hover:text-red-700 hover:underline transition-colors"
               >
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </button>
@@ -342,11 +399,111 @@ const AuthForm = ({ onAuth, isLoading, error }) => {
           </div>
         </div>
 
+        {/* Forgot Password Modal */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 max-w-md w-full">
+              <div className="text-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Reset Password</h2>
+                <p className="text-gray-600 text-sm">
+                  Enter your email address and we'll send you a link to reset your password.
+                </p>
+              </div>
+
+              {forgotPasswordSuccess ? (
+                <div className="text-center">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                    <p className="text-green-600 text-sm">
+                      ✅ Password reset email sent! Check your inbox and follow the link to reset your password.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleBackToSignIn}
+                    className="w-full bg-red-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors h-12"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                  <div>
+                    <label htmlFor="forgot-email" className="block text-sm font-semibold text-gray-700 mb-2">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" aria-hidden="true" />
+                      <input
+                        type="email"
+                        id="forgot-email"
+                        value={forgotPasswordEmail}
+                        onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                        className="w-full pl-10 pr-4 h-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-offset-2 focus:ring-red-500 focus:border-red-500 transition-colors text-base"
+                        placeholder="Enter your email address"
+                        disabled={isForgotPasswordLoading}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {forgotPasswordError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3" role="alert">
+                      <p className="text-red-600 text-sm">{forgotPasswordError}</p>
+                    </div>
+                  )}
+
+                  <div className="flex space-x-3">
+                    <button
+                      type="button"
+                      onClick={handleBackToSignIn}
+                      disabled={isForgotPasswordLoading}
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 px-4 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isForgotPasswordLoading}
+                      className="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 h-12"
+                    >
+                      {isForgotPasswordLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" aria-hidden="true"></div>
+                          <span>Sending...</span>
+                        </>
+                      ) : (
+                        <span>Send Reset Link</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
-        <div className="text-center mt-6">
-          <p className="text-white/60 text-xs sm:text-sm px-4">
+        <div className="text-center mt-8">
+          <p className="text-gray-500 text-sm mb-4">
             Capture the Hawks' Cooperstown memories
           </p>
+          <div className="flex justify-center space-x-4 text-xs text-gray-400">
+            <button 
+              type="button" 
+              className="hover:text-gray-600 transition-colors"
+              onClick={() => window.open('/privacy-policy', '_blank')}
+            >
+              Privacy Policy
+            </button>
+            <span>•</span>
+            <button 
+              type="button" 
+              className="hover:text-gray-600 transition-colors"
+              onClick={() => window.open('/terms-of-service', '_blank')}
+            >
+              Terms of Service
+            </button>
+          </div>
         </div>
       </div>
     </div>
