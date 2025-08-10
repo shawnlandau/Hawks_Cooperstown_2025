@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { FaDownload, FaHeart, FaTimes, FaChevronLeft, FaChevronRight, FaExpand, FaSpinner, FaFilter, FaPlus, FaCamera, FaVideo } from 'react-icons/fa';
-import { ref, listAll, getDownloadURL, getMetadata } from 'firebase/storage';
+import { FaDownload, FaHeart, FaTimes, FaChevronLeft, FaChevronRight, FaExpand, FaSpinner, FaFilter, FaPlus, FaCamera, FaVideo, FaTrash, FaTag } from 'react-icons/fa';
+import { ref, deleteObject } from 'firebase/storage';
+import { doc, deleteDoc, collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useFirebase } from '../hooks/useFirebase';
 import { teamRoster } from '../data/teamRoster';
 import { Link } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
 
 const PhotoGallery = () => {
-  const { storage, userId } = useFirebase();
+  const { storage, db, userId, auth } = useFirebase();
   const [photos, setPhotos] = useState([]);
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +27,9 @@ const PhotoGallery = () => {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [mediaType, setMediaType] = useState('all'); // 'all', 'photos', 'videos'
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const [deletingPhotos, setDeletingPhotos] = useState(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [mediaToDelete, setMediaToDelete] = useState(null);
   const lightboxRef = useRef(null);
   const imageRef = useRef(null);
   const playerFilterRef = useRef(null);
@@ -33,45 +37,59 @@ const PhotoGallery = () => {
   useEffect(() => {
     const fetchMedia = async () => {
       try {
-        // Fetch photos
-        const photosRef = ref(storage, 'photos');
-        const photosResult = await listAll(photosRef);
-        const photoPromises = photosResult.items.map(async (item) => {
-          const url = await getDownloadURL(item);
-          const metadata = await getMetadata(item);
+        // Fetch photos from Firestore to get metadata including tags
+        const photosQuery = query(collection(db, 'photos'), orderBy('timestamp', 'desc'));
+        const photosSnapshot = await getDocs(photosQuery);
+        const photoList = photosSnapshot.docs.map(doc => {
+          const data = doc.data();
           return {
-            id: item.name,
-            url,
-            name: item.name,
-            size: metadata.size,
-            uploadedAt: metadata.timeCreated,
-            contentType: metadata.contentType,
-            type: 'photo'
+            id: doc.id,
+            url: data.url,
+            name: data.originalName || data.fileName || 'Unknown',
+            size: data.fileSize || 0,
+            uploadedAt: data.timestamp?.toDate?.() || new Date(),
+            contentType: 'image/jpeg',
+            type: 'photo',
+            tags: data.tags || [],
+            caption: data.caption || '',
+            album: data.album || '',
+            uploadedBy: data.uploadedBy || '',
+            userEmail: data.userEmail || '',
+            storagePath: data.storagePath || `photos/${data.fileName}`
           };
         });
         
-        // Fetch videos
-        const videosRef = ref(storage, 'videos');
-        const videosResult = await listAll(videosRef);
-        const videoPromises = videosResult.items.map(async (item) => {
-          const url = await getDownloadURL(item);
-          const metadata = await getMetadata(item);
-          return {
-            id: item.name,
-            url,
-            name: item.name,
-            size: metadata.size,
-            uploadedAt: metadata.timeCreated,
-            contentType: metadata.contentType,
-            type: 'video'
-          };
-        });
+        // Fetch videos from Firestore (if videos collection exists)
+        let videoList = [];
+        try {
+          const videosQuery = query(collection(db, 'videos'), orderBy('timestamp', 'desc'));
+          const videosSnapshot = await getDocs(videosQuery);
+          videoList = videosSnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              url: data.url,
+              name: data.originalName || data.fileName || 'Unknown',
+              size: data.fileSize || 0,
+              uploadedAt: data.timestamp?.toDate?.() || new Date(),
+              contentType: 'video/mp4',
+              type: 'video',
+              tags: data.tags || [],
+              caption: data.caption || '',
+              album: data.album || '',
+              uploadedBy: data.uploadedBy || '',
+              userEmail: data.userEmail || '',
+              storagePath: data.storagePath || `videos/${data.fileName}`
+            };
+          });
+        } catch (videoError) {
+          console.log('No videos collection found or error fetching videos:', videoError);
+        }
         
-        const photoList = await Promise.all(photoPromises);
-        const videoList = await Promise.all(videoPromises);
-        
-        setPhotos(photoList.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
-        setVideos(videoList.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+        console.log('Fetched photos:', photoList);
+        console.log('Fetched videos:', videoList);
+        setPhotos(photoList);
+        setVideos(videoList);
       } catch (error) {
         console.error('Error fetching media:', error);
       } finally {
@@ -79,10 +97,10 @@ const PhotoGallery = () => {
       }
     };
 
-    if (storage) {
+    if (db && storage) {
       fetchMedia();
     }
-  }, [storage]);
+  }, [db, storage]);
 
   const getAllMedia = useCallback(() => {
     const allMedia = [...photos, ...videos];
@@ -99,7 +117,79 @@ const PhotoGallery = () => {
     }
     
     if (selectedPlayer) {
-      media = media.filter(item => item.tags && item.tags.includes(selectedPlayer.name));
+      const normalizeWhitespaceAndCase = (val) => (val || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+      const stripPunctuation = (val) => normalizeWhitespaceAndCase(val).replace(/[^a-z0-9 ]+/g, '');
+      const tokenize = (val) => stripPunctuation(val).split(' ').filter(Boolean);
+      const lastNameOf = (val) => {
+        const tokens = tokenize(val);
+        return tokens.length ? tokens[tokens.length - 1] : '';
+      };
+      const firstInitialOf = (val) => {
+        const tokens = tokenize(val);
+        return tokens.length ? tokens[0][0] : '';
+      };
+      const oneEditAway = (a, b) => {
+        // Return true if strings are identical or can be made identical by at most one insert/delete/replace
+        a = stripPunctuation(a);
+        b = stripPunctuation(b);
+        if (a === b) return true;
+        const lenA = a.length, lenB = b.length;
+        if (Math.abs(lenA - lenB) > 1) return false;
+        let i = 0, j = 0, edits = 0;
+        while (i < lenA && j < lenB) {
+          if (a[i] === b[j]) { i++; j++; continue; }
+          edits++;
+          if (edits > 1) return false;
+          if (lenA > lenB) { i++; } // deletion in a
+          else if (lenB > lenA) { j++; } // insertion in a
+          else { i++; j++; } // replacement
+        }
+        // Account for trailing char
+        if (i < lenA || j < lenB) edits++;
+        return edits <= 1;
+      };
+
+      const selectedName = normalizeWhitespaceAndCase(selectedPlayer.name);
+      const selectedLast = lastNameOf(selectedName);
+      const selectedInitial = firstInitialOf(selectedName);
+      const playerJersey = (selectedPlayer.jerseyNumber || '').toString();
+
+      const tagMatchesPlayer = (rawTag) => {
+        const tag = normalizeWhitespaceAndCase(rawTag);
+        const tagStripped = stripPunctuation(tag);
+        const tagTokens = tokenize(tag);
+        const tagLast = tagTokens.length ? tagTokens[tagTokens.length - 1] : '';
+        const tagInitial = tagTokens.length ? tagTokens[0][0] : '';
+
+        // Strong matches
+        if (tagStripped === stripPunctuation(selectedName)) return true; // full match ignoring punctuation
+        if (tag.includes(selectedName) || selectedName.includes(tag)) return true; // substring either way
+
+        // Last-name based matches (handles Mike vs Michael, hyphens, etc.)
+        if (tagLast && selectedLast && (tagLast === selectedLast || oneEditAway(tagLast, selectedLast))) {
+          // If both include first names, prefer initial match when available
+          if (tagInitial && selectedInitial) {
+            if (tagInitial === selectedInitial) return true;
+          }
+          // Otherwise accept last-name match
+          return true;
+        }
+
+        // Jersey number tagged (e.g., "#7" or "7")
+        if (playerJersey) {
+          const jerseyPatterns = [playerJersey, `#${playerJersey}`];
+          if (jerseyPatterns.some((p) => tagTokens.includes(p.replace('#','')) || tag.includes(p))) {
+            return true;
+          }
+        }
+
+        return false;
+      };
+
+      media = media.filter((item) => {
+        const tags = Array.isArray(item.tags) ? item.tags : [];
+        return tags.some(tagMatchesPlayer);
+      });
     }
     
     return media;
@@ -318,6 +408,101 @@ const PhotoGallery = () => {
     }
   };
 
+  // Delete media function
+  const deleteMedia = async (media) => {
+    if (!userId) {
+      alert('Please sign in to delete media.');
+      return;
+    }
+
+    // Check if user is admin or the owner of the media
+    const isAdmin = auth?.currentUser?.email === 'shawnjl@outlook.com';
+    const isOwner = media.uploadedBy === userId;
+    
+    if (!isAdmin && !isOwner) {
+      alert('You can only delete your own media.');
+      return;
+    }
+
+    setDeletingPhotos(prev => new Set([...prev, media.id]));
+    
+    try {
+      // Delete from Firebase Storage using the storagePath (best-effort)
+      let storageDeleteError = null;
+      if (media.storagePath) {
+        try {
+          const storageRef = ref(storage, media.storagePath);
+          await deleteObject(storageRef);
+        } catch (err) {
+          storageDeleteError = err;
+          console.warn('Storage delete failed, proceeding to delete Firestore doc:', err);
+        }
+      } else {
+        console.warn('No storagePath on media; skipping storage delete and proceeding to Firestore doc delete.');
+      }
+
+      // Always attempt to delete Firestore doc, even if storage delete failed
+      if (db) {
+        const collectionName = media.type === 'photo' ? 'photos' : 'videos';
+        const docRef = doc(db, collectionName, media.id);
+        try {
+          await deleteDoc(docRef);
+        } catch (firestoreErr) {
+          // If Firestore delete fails, surface this to user, as this is the source of truth for the UI
+          throw firestoreErr;
+        }
+      }
+      
+      // Remove from local state
+      if (media.type === 'photo') {
+        setPhotos(prev => prev.filter(p => p.id !== media.id));
+      } else {
+        setVideos(prev => prev.filter(v => v.id !== media.id));
+      }
+      
+      // Close lightbox if the deleted media was being viewed
+      if (lightboxOpen && selectedMedia && selectedMedia.id === media.id) {
+        closeLightbox();
+      }
+      
+      if (storageDeleteError) {
+        alert('Media removed from gallery. The file could not be removed from storage automatically and may require manual cleanup.');
+      } else {
+        alert('Media deleted successfully!');
+      }
+    } catch (error) {
+      console.error('Error deleting media:', error);
+      alert('Failed to delete media. Please try again.');
+    } finally {
+      setDeletingPhotos(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(media.id);
+        return newSet;
+      });
+    }
+  };
+
+  // Confirm delete dialog
+  const confirmDelete = (media) => {
+    setMediaToDelete(media);
+    setShowDeleteConfirm(true);
+  };
+
+  // Handle delete confirmation
+  const handleDeleteConfirm = async () => {
+    if (mediaToDelete) {
+      await deleteMedia(mediaToDelete);
+      setShowDeleteConfirm(false);
+      setMediaToDelete(null);
+    }
+  };
+
+  // Cancel delete confirmation
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false);
+    setMediaToDelete(null);
+  };
+
   // Filter media based on selected player and media type
   const filteredMedia = getFilteredMedia();
 
@@ -367,6 +552,18 @@ const PhotoGallery = () => {
                   : `${getAllMedia().length} items • Capture the Hawks' Cooperstown memories`
                 }
               </p>
+              
+              {/* Debug Info - Remove this after testing */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="mt-4 p-3 bg-black/20 rounded-lg text-xs text-white/80">
+                  <div>Photos: {photos.length} | Videos: {videos.length}</div>
+                  <div>Photos with tags: {photos.filter(p => p.tags && p.tags.length > 0).length}</div>
+                  <div>Videos with tags: {videos.filter(v => v.tags && v.tags.length > 0).length}</div>
+                  {selectedPlayer && (
+                    <div>Filtering by: {selectedPlayer.name}</div>
+                  )}
+                </div>
+              )}
             </div>
             
             {/* Controls */}
@@ -530,9 +727,14 @@ const PhotoGallery = () => {
               <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <FaHeart className="w-10 h-10 text-white/60" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-4">No Media Yet</h3>
+              <h3 className="text-2xl font-bold text-white mb-4">
+                {selectedPlayer ? `No Media for ${selectedPlayer.name}` : 'No Media Yet'}
+              </h3>
               <p className="text-white/80 text-lg mb-8 leading-relaxed">
-                Be the first to share photos and videos from the Hawks' Cooperstown journey!
+                {selectedPlayer 
+                  ? `No photos or videos tagged with ${selectedPlayer.name} yet. Upload some media and tag them!`
+                  : 'Be the first to share photos and videos from the Hawks\' Cooperstown journey!'
+                }
               </p>
               <Link
                 to="/upload"
@@ -579,7 +781,7 @@ const PhotoGallery = () => {
                   {/* Overlay */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-300">
                     {/* Media Type Badge */}
-                    <div className="absolute top-4 left-4">
+                    <div className="absolute top-4 left-4 flex flex-col space-y-2">
                       {media.type === 'video' ? (
                         <div className="bg-gradient-to-r from-hawks-red to-red-600 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg flex items-center space-x-2">
                           <FaVideo className="w-3 h-3" />
@@ -589,6 +791,14 @@ const PhotoGallery = () => {
                         <div className="bg-white/95 text-hawks-navy text-xs font-bold px-3 py-2 rounded-full shadow-lg flex items-center space-x-2">
                           <FaCamera className="w-3 h-3" />
                           <span>PHOTO</span>
+                        </div>
+                      )}
+                      
+                      {/* Tags Indicator */}
+                      {media.tags && media.tags.length > 0 && (
+                        <div className="bg-hawks-navy/90 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg flex items-center space-x-2">
+                          <FaTag className="w-3 h-3" />
+                          <span>{media.tags.length} TAG{media.tags.length !== 1 ? 'S' : ''}</span>
                         </div>
                       )}
                     </div>
@@ -630,6 +840,25 @@ const PhotoGallery = () => {
                       >
                         <FaExpand className="w-5 h-5" />
                       </button>
+                      
+                      {/* Delete Button - Only show for owners or admin */}
+                      {(auth?.currentUser?.email === 'shawnjl@outlook.com' || media.uploadedBy === userId) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            confirmDelete(media);
+                          }}
+                          disabled={deletingPhotos.has(media.id)}
+                          className="w-14 h-14 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-all duration-200 shadow-lg disabled:opacity-50 min-h-[56px] min-w-[56px]"
+                          aria-label="Delete media"
+                        >
+                          {deletingPhotos.has(media.id) ? (
+                            <FaSpinner className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <FaTrash className="w-5 h-5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -637,7 +866,14 @@ const PhotoGallery = () => {
                 {/* Media Info */}
                 <div className="p-4 bg-white">
                   <p className="text-sm text-gray-700 truncate font-medium" title={media.name}>
-                    {media.name}
+                    {(() => {
+                      // Prefer caption, else a cleaned-up name without uid/timestamp prefixes
+                      const label = (media.caption || '').trim();
+                      if (label) return label;
+                      const raw = (media.name || '').toString();
+                      const cleaned = raw.replace(/^[^_]+_\d{10,14}_\d+_/,'');
+                      return cleaned || 'Untitled';
+                    })()}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
                     {(media.size / 1024 / 1024).toFixed(1)} MB
@@ -739,8 +975,65 @@ const PhotoGallery = () => {
                       )}
                       <span className="hidden sm:inline">Download</span>
                     </button>
+                    
+                    {/* Delete Button - Only show for owners or admin */}
+                    {(auth?.currentUser?.email === 'shawnjl@outlook.com' || selectedMedia.uploadedBy === userId) && (
+                      <button
+                        onClick={() => confirmDelete(selectedMedia)}
+                        disabled={deletingPhotos.has(selectedMedia.id)}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2 min-h-[48px] disabled:opacity-50"
+                      >
+                        {deletingPhotos.has(selectedMedia.id) ? (
+                          <FaSpinner className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <FaTrash className="w-4 h-4" />
+                        )}
+                        <span className="hidden sm:inline">Delete</span>
+                      </button>
+                    )}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && mediaToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FaTrash className="w-8 h-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">
+                Delete {mediaToDelete.type === 'video' ? 'Video' : 'Photo'}?
+              </h3>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to delete "{mediaToDelete.name}"? This action cannot be undone.
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleDeleteCancel}
+                  className="flex-1 bg-gray-200 text-gray-800 px-4 py-3 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deletingPhotos.has(mediaToDelete.id)}
+                  className="flex-1 bg-red-600 text-white px-4 py-3 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deletingPhotos.has(mediaToDelete.id) ? (
+                    <span className="flex items-center justify-center">
+                      <FaSpinner className="w-4 h-4 animate-spin mr-2" />
+                      Deleting...
+                    </span>
+                  ) : (
+                    'Delete'
+                  )}
+                </button>
               </div>
             </div>
           </div>
